@@ -2,7 +2,6 @@
 from klemr.rules.models import (
     Gate,
     PolicyCitation,
-    RafFeeSchedule,
     ResolutionOutcome,
     ResolutionPolicy,
     Rule,
@@ -23,7 +22,6 @@ RAF_AUTO_CANCEL_RULE_ID = "raf.auto_cancel_exemption"
 __all__ = [
     "Rule",
     "RuleParameters",
-    "RafFeeSchedule",
     "PolicyCitation",
     "Gate",
     "ResolutionOutcome",

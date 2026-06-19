@@ -35,10 +35,13 @@ The UI imports the engine; the engine never imports the UI.
 ## Rule store — policy as data
 
 The RAF policy is **not** hardcoded. It lives in a versioned JSON rule
-(`klemr/rules/data/raf_auto_cancel_exemption.v2025-05-15.json`) loaded by `RuleStore`:
-fee schedule (20% / $5-per-SKU / effective 2025-05-15), verbatim citation, the
-three-gate test, and the resolution→tier mapping. Each rule has a deterministic
-`content_hash()` so findings are reproducible and traceable to exact policy text.
+(`klemr/rules/data/raf_auto_cancel_exemption.v2025-05-15.json`) loaded by `RuleStore`.
+The `Rule` model is a **claim-agnostic envelope** (identity, `logic_id`, citation,
+gates, resolution→tier map, timing parameters) plus an opaque **`payload`** that only
+the matching plugin interprets — for RAF-1a that's the fee schedule (20% / $5-per-SKU /
+effective 2025-05-15). A second claim type is a new JSON rule + plugin, **not** a change
+to the rule model. Each rule has a deterministic `content_hash()` (payload included) so
+findings are reproducible and traceable to exact policy text.
 
 The most important fact is encoded structurally: **Gate 3 (`auto_approved`) has
 `in_data: false`** — it cannot be read from the exports and must never be inferred.

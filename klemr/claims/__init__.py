@@ -4,11 +4,13 @@
 RAF-1a is the only one in scope for this slice; new claim types register here.
 """
 from klemr.claims.base import ClaimRegistry, ClaimType, IncompatibleRule
-from klemr.claims.raf_1a import RafAutoCancelClaim
+from klemr.claims.raf_1a import RafAutoCancelClaim, RafFeeSchedule
 from klemr.claims.state import (
     ALLOWED_TRANSITIONS,
+    TERMINAL_STATES,
     ClaimState,
     can_transition,
+    is_terminal,
 )
 
 
@@ -23,8 +25,11 @@ __all__ = [
     "ClaimRegistry",
     "IncompatibleRule",
     "RafAutoCancelClaim",
+    "RafFeeSchedule",
     "ClaimState",
     "ALLOWED_TRANSITIONS",
+    "TERMINAL_STATES",
     "can_transition",
+    "is_terminal",
     "default_registry",
 ]

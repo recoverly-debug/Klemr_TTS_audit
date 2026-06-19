@@ -3,7 +3,6 @@ maturity boundary, deterministic content hash, version selection."""
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
 
 import pytest
 
@@ -23,35 +22,18 @@ def store() -> RuleStore:
     return default_rule_store()
 
 
-# ---- policy values live as DATA, not constants ----
-def test_raf_fee_schedule_values(store):
-    rule = store.latest(RULE_ID)
-    fs = rule.fee_schedule
-    assert fs.referral_fee_rate == Decimal("0.20")
-    assert fs.per_sku_cap == Decimal("5.00")  # the $5/SKU cap
-    assert fs.cap_effective_date == date(2025, 5, 15)
-    assert fs.cap_basis == "sku"
-    assert fs.currency == "USD"
-
-
+# ---- generic envelope carries logic binding + claim-specific payload as data ----
 def test_rule_carries_logic_id(store):
-    # FIX 3: the data declares which engine logic may evaluate it.
+    # the data declares which engine logic may evaluate it (rule->logic binding).
     assert store.latest(RULE_ID).logic_id == "raf.auto_cancel.v1"
 
 
-def test_raf_cap_applies_per_sku_then_sums_at_cent_precision(store):
-    fs = store.latest(RULE_ID).fee_schedule
-    # one SKU under the cap: 20% of 12.34 = 2.468 -> 2.47 (HALF_UP, cents)
-    assert fs.raf_for_sku(Decimal("12.34")) == Decimal("2.47")
-    # one SKU over the cap: 20% of 50.00 = 10.00 -> capped at 5.00
-    assert fs.raf_for_sku(Decimal("50.00")) == Decimal("5.00")
-    # referral lines are stored negative; magnitude is used
-    assert fs.raf_for_sku(Decimal("-50.00")) == Decimal("5.00")
-    # cap PER SKU, THEN sum: 5.00 (capped) + 0.60 + 2.47 = 8.07
-    order_total = fs.raf_for_order([Decimal("50.00"), Decimal("3.00"), Decimal("12.34")])
-    assert order_total == Decimal("8.07")
-    # NOT the same as capping the order as a whole at $5 — that would wrongly give 5.00
-    assert order_total != fs.per_sku_cap
+def test_payload_is_opaque_to_the_envelope(store):
+    # claim-specific policy lives in `payload`; the envelope does not type it.
+    # (RAF interprets payload["fee_schedule"] — covered in test_claims.py)
+    rule = store.latest(RULE_ID)
+    assert "fee_schedule" in rule.payload
+    assert not hasattr(rule, "fee_schedule")  # no RAF-specific field on the envelope
 
 
 def test_citation_is_verbatim(store):
@@ -85,9 +67,9 @@ def test_three_gates_and_gate3_not_in_data(store):
         ("auto_approved", "filable_tier1"),
         ("Auto-Approved", "filable_tier1"),
         ("approved", "filable_tier1"),
-        ("seller_canceled", "held_tier2"),
-        ("Seller Canceled", "held_tier2"),
-        ("manual", "held_tier2"),
+        ("seller_canceled", "dismissed"),  # Gate 3 = NOT exempt -> terminal dismissed
+        ("Seller Canceled", "dismissed"),
+        ("manual", "dismissed"),
         ("", "needs_review"),
         ("other", "needs_review"),
         ("bought by mistake", "needs_review"),  # a buyer reason is never filable
@@ -96,6 +78,14 @@ def test_three_gates_and_gate3_not_in_data(store):
 def test_resolution_classification(store, raw, tier):
     policy = store.latest(RULE_ID).resolution_policy
     assert policy.classify(raw).tier == tier
+
+
+def test_seller_canceled_carries_tier2_appeal_flag(store):
+    # the Tier-2 appeal is metadata on the dismissed outcome, never a primary state.
+    policy = store.latest(RULE_ID).resolution_policy
+    out = policy.classify("seller_canceled")
+    assert out is policy.dismissed
+    assert "tier2_appeal_candidate" in out.flags
 
 
 # ---- maturity / freshness boundary (pure policy math) ----

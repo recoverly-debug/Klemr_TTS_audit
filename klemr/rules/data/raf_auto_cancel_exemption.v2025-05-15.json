@@ -13,16 +13,18 @@
     "last_revised": "2025-05-08",
     "quote": "If a refund is initiated by the buyer before the order is shipped and meets the auto-canceling criteria, no Refund Administration Fee will be charged."
   },
-  "fee_schedule": {
-    "referral_fee_rate": "0.20",
-    "per_sku_cap": "5.00",
-    "cap_effective_date": "2025-05-15",
-    "cap_basis": "sku",
-    "currency": "USD"
-  },
   "parameters": {
     "maturity_days": 21,
     "fresh_days": 3
+  },
+  "payload": {
+    "fee_schedule": {
+      "referral_fee_rate": "0.20",
+      "per_sku_cap": "5.00",
+      "cap_effective_date": "2025-05-15",
+      "cap_basis": "sku",
+      "currency": "USD"
+    }
   },
   "gates": [
     {
@@ -59,10 +61,11 @@
       "tier": "filable_tier1",
       "aliases": ["auto_approved", "autoapproved", "auto-approved", "auto", "approved"]
     },
-    "held": {
+    "dismissed": {
       "resolution": "seller_canceled",
-      "tier": "held_tier2",
-      "aliases": ["seller_canceled", "sellercanceled", "seller-canceled", "seller", "manual"]
+      "tier": "dismissed",
+      "aliases": ["seller_canceled", "sellercanceled", "seller-canceled", "seller", "manual"],
+      "flags": ["tier2_appeal_candidate"]
     },
     "review": {
       "resolution": "other",
