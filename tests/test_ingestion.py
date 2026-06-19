@@ -32,15 +32,13 @@ CANCELLATION = str(ROOT / "fixtures" / "raw" / "Canceled order-2026-06-17-16_14.
 
 
 @pytest.fixture(scope="module")
-def export():
-    # The slow file read happens ONCE for the whole module (openpyxl is the cost).
-    return fetch_tiktok(SETTLEMENTS, CANCELLATION)
+def export(tiktok_export):  # session-scoped read shared across the whole suite
+    return tiktok_export
 
 
 @pytest.fixture(scope="module")
-def dataset(export):
-    # ingested_at left None -> deterministic, never fabricated.
-    return normalize_export(export)
+def dataset(canonical_dataset):
+    return canonical_dataset
 
 
 # ---- acceptance: funnel input ----

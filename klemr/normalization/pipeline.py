@@ -35,6 +35,22 @@ class CanonicalDataset:
     issues: tuple[NormalizationIssue, ...]
 
 
+def settlement_order_ids(export: RawExport) -> set[str]:
+    """Every cleaned order id present in settlement (any row, incl. zero-fee).
+
+    Used for the period-alignment diagnostic: cancellation orders absent from this set
+    settled no RAF and cannot be recovered. Independent of which charges were emitted.
+    """
+    from klemr.normalization.ids import clean_order_id
+
+    ids: set[str] = set()
+    for table in export.settlements:
+        col = table.columns["order_id"]
+        ids.update(clean_order_id(v) for v in table.frame[col])
+    ids.discard("")
+    return ids
+
+
 def fetch_tiktok(settlement_paths, cancellation_path) -> RawExport:
     """The (slow) ingestion step: read the files into raw rows + content hashes.
 

@@ -15,6 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from klemr.canonical.charges import ChargeType
 from klemr.canonical.events import CancellationEvent, Party
 from klemr.canonical.money import to_money
 from klemr.claims.base import ClaimType
@@ -64,6 +65,9 @@ class RafAutoCancelClaim(ClaimType):
     title = "TikTok Shop RAF — Auto-Cancellation Exemption (Leakage 1a)"
     rule_id = RAF_1A_RULE_ID
     logic_id = RAF_1A_LOGIC_ID
+    # The charge whose deduction this claim recovers; the reconciler reads this so it
+    # stays claim-agnostic (a carrier claim would name a different charge type).
+    recoverable_charge_type = ChargeType.REFUND_ADMINISTRATION_FEE
 
     def rule(self, store: RuleStore) -> Rule:
         # Latest version by default; reconciliation may instead pick the version
