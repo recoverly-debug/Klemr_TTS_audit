@@ -103,7 +103,8 @@ def test_shipped_before_cancel_is_a_neutral_temporal_fact():
     )
     assert before.shipped_before_cancel is True
 
-    # tracking present, no cancel time recorded -> treated as shipped
+    # tracking present but no cancel time -> cannot assert tracking precedes cancel
+    # (strict-< definition, None-guarded) -> not shipped_before_cancel
     open_cancel = CancellationEvent(
         order_id="1",
         initiated_by=Party.BUYER,
@@ -111,7 +112,17 @@ def test_shipped_before_cancel_is_a_neutral_temporal_fact():
         cancelled_at=None,
         provenance=PROV,
     )
-    assert open_cancel.shipped_before_cancel is True
+    assert open_cancel.shipped_before_cancel is False
+
+    # tracking AT the cancel instant is not strictly before -> not shipped
+    simultaneous = CancellationEvent(
+        order_id="1",
+        initiated_by=Party.BUYER,
+        tracking_uploaded_at=datetime(2026, 5, 2),
+        cancelled_at=datetime(2026, 5, 2),
+        provenance=PROV,
+    )
+    assert simultaneous.shipped_before_cancel is False
 
 
 def test_canonical_models_are_immutable():

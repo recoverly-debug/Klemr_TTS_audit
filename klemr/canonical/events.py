@@ -76,15 +76,16 @@ class CancellationEvent(CommerceEvent):
 
     @property
     def shipped_before_cancel(self) -> bool:
-        """Neutral temporal fact: was a dispatch/tracking anchor recorded at or
-        before the cancellation?
+        """Neutral temporal fact, DERIVED (never ingested as a flag): was a dispatch
+        anchor recorded *strictly before* the cancellation?
+
+        ``= (tracking_uploaded_at is not None) and (tracking_uploaded_at < cancelled_at)``
 
         This carries no channel's *definition* of "shipped" and no eligibility
-        verdict — a claim-type plugin decides whether this fact disqualifies a
-        claim. ``None`` tracking == no anchor == not shipped.
+        verdict — the channel decides what populates ``tracking_uploaded_at`` and a
+        claim-type plugin decides whether this fact disqualifies a claim. A missing
+        tracking anchor (or missing cancel time) reads as not-shipped.
         """
-        if self.tracking_uploaded_at is None:
+        if self.tracking_uploaded_at is None or self.cancelled_at is None:
             return False
-        if self.cancelled_at is None:
-            return True
-        return self.tracking_uploaded_at <= self.cancelled_at
+        return self.tracking_uploaded_at < self.cancelled_at

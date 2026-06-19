@@ -22,6 +22,9 @@ class SourceRef(BaseModel):
     # Row indices within the source file/sheet. SKU-level rows collapsed to an
     # order may reference several rows; hence a tuple.
     row_indices: tuple[int, ...] = ()
+    # SHA-256 of the source file's raw bytes, so "same inputs -> identical output"
+    # is verifiable: the hash rides every record derived from the file.
+    content_sha256: str | None = None
 
 
 class Provenance(BaseModel):
