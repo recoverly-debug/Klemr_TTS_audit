@@ -47,13 +47,20 @@ The most important fact is encoded structurally: **Gate 3 (`auto_approved`) has
 
 ```bash
 uv sync                 # core engine + dev (pydantic, pytest); Python pinned to 3.12
-uv run pytest           # run the engine tests
+uv run pytest           # runs core tests; ingestion tests SKIP without the ingest extra
 
 # heavier lanes install their deps on demand, per build step:
-uv sync --extra ingest  # pandas + openpyxl  (Step 2)
+uv sync --extra ingest  # pandas + openpyxl  (Step 2) — needed for the ingestion tests
 uv sync --extra packet  # reportlab + pillow (Step 5)
 uv sync --extra ui      # streamlit          (Step 6)
+
+# full suite (engine + ingestion):
+uv sync --extra ingest && uv run pytest
 ```
+
+Note: `tests/test_ingestion.py` reads the fixture exports via pandas/openpyxl, so it
+`importorskip`s when the `ingest` extra is absent — a core `uv sync` still collects and
+runs cleanly (the ingestion tests report as skipped, not errored).
 
 ## Build order
 

@@ -6,15 +6,25 @@ from pathlib import Path
 
 import pytest
 
+# Ingestion requires the optional `ingest` extra (pandas + openpyxl). Skip this whole
+# module cleanly when it isn't installed so the core `uv run pytest` still collects.
+pytest.importorskip(
+    "pandas",
+    reason="ingestion tests require the 'ingest' extra: uv sync --extra ingest",
+)
+
+import pandas as pd
+
 from klemr.canonical.charges import ChargeType
 from klemr.canonical.events import CancellationEvent, Party
 from klemr.claims.raf_1a import RafAutoCancelClaim
-from klemr.ingestion.tiktok_files import _sha256_file
+from klemr.ingestion.tiktok_files import RawExport, RawTable, SourceFile, _sha256_file
 from klemr.normalization.pipeline import (
     fetch_tiktok,
     normalize_export,
     stable_dump,
 )
+from klemr.normalization.tiktok import normalize_cancellations
 
 ROOT = Path(__file__).resolve().parent.parent
 SETTLEMENTS = sorted(glob.glob(str(ROOT / "fixtures" / "raw" / "income_*.xlsx")))
@@ -113,6 +123,30 @@ def test_join_index_keyed_by_order(dataset):
     # to the cancellation domain)
     for c in dataset.charges[:20]:
         assert c.order_id in dataset.by_order
+
+
+# ---- blank order ids are quarantined, not turned into junk entities (fast, no IO) ----
+def _mini_cancellations(rows):
+    frame = pd.DataFrame(rows).reset_index(drop=True)
+    src = SourceFile(path="x.csv", basename="x.csv", kind="cancellation",
+                     sheet=None, content_sha256="0" * 64)
+    cols = {"order_id": "Order ID", "cancel_by": "Cancel By", "rts_time": "RTS Time",
+            "cancelled_time": "Cancelled Time", "reason": "Cancel Reason"}
+    return RawExport(
+        cancellations=RawTable(source=src, frame=frame, columns=cols), settlements=()
+    )
+
+
+def test_blank_order_id_is_quarantined_as_issue():
+    export = _mini_cancellations([
+        {"Order ID": "123\t", "Cancel By": "User", "RTS Time": "",
+         "Cancelled Time": "06/16/2026 7:54:44 PM", "Cancel Reason": "x"},
+        {"Order ID": "\t", "Cancel By": "User", "RTS Time": "",
+         "Cancelled Time": "06/16/2026 7:54:44 PM", "Cancel Reason": "y"},
+    ])
+    events, issues = normalize_cancellations(export)
+    assert [e.order_id for e in events] == ["123"]  # no "" entity
+    assert any(i.field == "order_id" and "blank" in i.detail for i in issues)
 
 
 # ---- integration smoke: exercises the EXISTING plugin seam, not new logic ----

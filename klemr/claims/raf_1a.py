@@ -42,7 +42,8 @@ class RafAutoCancelClaim(ClaimType):
         """Gate 2 — pre-shipment: no dispatch anchor preceded the cancellation.
 
         RAF-1a's definition of "shipped" is precisely the canonical neutral fact
-        ``shipped_before_cancel`` (tracking uploaded at/before the cancel); the
+        ``shipped_before_cancel`` (tracking uploaded *strictly before* the cancel —
+        tracking at the exact cancel instant does not count as shipped); the
         *interpretation* that this disqualifies a claim is the plugin's, not the
         event's.
         """

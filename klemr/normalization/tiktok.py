@@ -110,6 +110,13 @@ def normalize_cancellations(
 
     events: list[CancellationEvent] = []
     for oid, rows in order_rows.items():
+        if not oid:
+            # Blank cleaned order id: quarantine as an issue rather than emit a junk
+            # entity keyed by "" (upholds "nothing silently dropped").
+            issues.append(NormalizationIssue(
+                src.basename, "", "order_id", "",
+                f"blank order id on {len(rows)} row(s); skipped"))
+            continue
         sub = frame.loc[rows]
         by_raw = _first_nonblank(sub[cols["cancel_by"]])
         rts_raw = _first_nonblank(sub[cols["rts_time"]]) if has_rts else ""
@@ -219,6 +226,8 @@ def _charges_from_table(
     for row_idx in row_index:
         row = frame.loc[row_idx]
         oid = oids.loc[row_idx]
+        if not oid:
+            continue  # never key a charge by a blank order id
 
         sku_id = _clean_cell(row[cols["sku_id"]]) if has_sku else None
         sku_id = sku_id or None
