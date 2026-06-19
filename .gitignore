@@ -1,0 +1,49 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Virtual envs / uv ---
+# uv.lock is intentionally NOT ignored: this is an application, so the lockfile is committed.
+.venv/
+venv/
+env/
+
+# --- Engine runtime artifacts (generated, never committed) ---
+# SQLite evidence/credit ledgers, detector outputs, generated packets.
+*.sqlite
+*.sqlite3
+*.db
+/out/
+/raf_out/
+*_Evidence_Packet.pdf
+candidates.csv
+anomalies.csv
+not_in_settlement.csv
+raf_out_of_scope_informational.csv
+summary.txt
+summary.json
+
+# --- Secrets / connector credentials (OAuth/portal/email stubs land here later) ---
+.env
+.env.*
+secrets/
+*.secret
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- NOTE on fixtures ---
+# fixtures/ (raw exports, ground-truth resolutions, screenshots) ARE committed:
+# they are the acceptance-test oracle. Do not ignore them.

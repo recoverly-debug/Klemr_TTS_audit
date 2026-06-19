@@ -1,0 +1,50 @@
+[project]
+name = "klemr-audit-engine"
+version = "0.1.0"
+description = "Klemr reconciliation engine (v7 slice): TikTok Shop RAF auto-cancellation exemption (Leakage 1a). Agent suggests, math decides."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Klemr" }]
+
+# Core engine dependencies (the deterministic 'accountant' + canonical models).
+# Heavy I/O and UI deps live in optional extras so the engine core stays light
+# and each build step installs only what it needs.
+dependencies = [
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+# Step 2 — file ingestion / normalization (settlement .xlsx + cancellation .csv)
+ingest = [
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+]
+# Step 5 — Tier-1 evidence packet PDF
+packet = [
+    "reportlab>=4.1",
+    "pillow>=10.3",
+]
+# Step 6 — Streamlit review UI (thin shell over the engine)
+ui = [
+    "streamlit>=1.36",
+]
+# Step 7 — minimal CLI
+cli = [
+    "typer>=0.12",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["klemr"]

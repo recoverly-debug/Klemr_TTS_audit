@@ -1,0 +1,73 @@
+{
+  "rule_id": "raf.auto_cancel_exemption",
+  "version": "2025-05-15",
+  "logic_id": "raf.auto_cancel.v1",
+  "effective_date": "2025-05-15",
+  "supersedes": null,
+  "title": "TikTok Shop RAF — Buyer Pre-Shipment Auto-Cancellation Exemption (Leakage 1a)",
+  "description": "A Refund Administration Fee must be $0 when a buyer initiates a refund before the order is shipped and the cancellation meets TikTok's auto-canceling (24-hour no-action SLA) criteria. RAF deducted on such orders is recoverable.",
+  "citation": {
+    "title": "Referral Fee Updates",
+    "publisher": "TikTok Shop US — Seller Academy",
+    "url": "https://seller-us.tiktok.com/university/essay?knowledge_id=5982454398175018",
+    "last_revised": "2025-05-08",
+    "quote": "If a refund is initiated by the buyer before the order is shipped and meets the auto-canceling criteria, no Refund Administration Fee will be charged."
+  },
+  "fee_schedule": {
+    "referral_fee_rate": "0.20",
+    "per_sku_cap": "5.00",
+    "cap_effective_date": "2025-05-15",
+    "cap_basis": "sku",
+    "currency": "USD"
+  },
+  "parameters": {
+    "maturity_days": 21,
+    "fresh_days": 3
+  },
+  "gates": [
+    {
+      "number": 1,
+      "key": "buyer_initiated",
+      "name": "Buyer-initiated",
+      "source": "data",
+      "in_data": true,
+      "decisive": false,
+      "description": "Cancellation export Cancel By = User; order history shows the cancellation request was submitted by the customer."
+    },
+    {
+      "number": 2,
+      "key": "pre_shipment",
+      "name": "Before shipment",
+      "source": "data",
+      "in_data": true,
+      "decisive": false,
+      "description": "No tracking upload / dispatch; RTS Time empty; the order was canceled pre-shipment."
+    },
+    {
+      "number": 3,
+      "key": "auto_approved",
+      "name": "Auto-cancel criteria met",
+      "source": "seller_center",
+      "in_data": false,
+      "decisive": true,
+      "description": "Seller Center order-history resolution line shows the cancellation was auto-approved on the 24-hour no-action SLA. NOT present in the export files — must be verified by a human or the Order API. 'Seller canceled' and 'auto-approved' are indistinguishable in the data."
+    }
+  ],
+  "resolution_policy": {
+    "filable": {
+      "resolution": "auto_approved",
+      "tier": "filable_tier1",
+      "aliases": ["auto_approved", "autoapproved", "auto-approved", "auto", "approved"]
+    },
+    "held": {
+      "resolution": "seller_canceled",
+      "tier": "held_tier2",
+      "aliases": ["seller_canceled", "sellercanceled", "seller-canceled", "seller", "manual"]
+    },
+    "review": {
+      "resolution": "other",
+      "tier": "needs_review",
+      "aliases": []
+    }
+  }
+}
