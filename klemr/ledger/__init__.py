@@ -1,7 +1,22 @@
-"""Evidence ledger — SQLite provenance store (Step 4).
+"""Evidence ledger — append-only SQLite system of record + the Gate-3 verify flow.
 
-Every finding records its source rows, rule version + content hash, confidence,
-and (post-verify) reviewer + resolution + screenshot. All verification decisions
-are written here so a UI refresh never loses work. The recovery / credit ledger is
-a stubbed interface only. Not implemented in this slice.
+The recovery / credit ledger is still a stubbed interface (post-filing transitions
+exist as legal states but are not wired here).
 """
+from klemr.ledger.storage import (
+    CoverageNote,
+    EvidenceLedger,
+    ResolutionRecord,
+    TransitionRecord,
+)
+from klemr.ledger.verify import VerifyResult, replay, verify_finding
+
+__all__ = [
+    "EvidenceLedger",
+    "ResolutionRecord",
+    "TransitionRecord",
+    "CoverageNote",
+    "verify_finding",
+    "replay",
+    "VerifyResult",
+]

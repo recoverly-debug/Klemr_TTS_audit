@@ -71,8 +71,23 @@ ALLOWED_TRANSITIONS: dict[ClaimState, frozenset[ClaimState]] = {
 }
 
 
+class IllegalTransition(ValueError):
+    """A claim state change not permitted by ALLOWED_TRANSITIONS."""
+
+    def __init__(self, src: ClaimState, dst: ClaimState) -> None:
+        super().__init__(f"Illegal claim transition: {src.value} -> {dst.value}")
+        self.src = src
+        self.dst = dst
+
+
 def can_transition(src: ClaimState, dst: ClaimState) -> bool:
     return dst in ALLOWED_TRANSITIONS.get(src, frozenset())
+
+
+def assert_transition(src: ClaimState, dst: ClaimState) -> None:
+    """Raise ``IllegalTransition`` unless ``src -> dst`` is allowed (never a silent no-op)."""
+    if not can_transition(src, dst):
+        raise IllegalTransition(src, dst)
 
 
 def is_terminal(state: ClaimState) -> bool:

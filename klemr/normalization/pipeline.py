@@ -51,6 +51,26 @@ def settlement_order_ids(export: RawExport) -> set[str]:
     return ids
 
 
+def settlement_statement_window(export: RawExport):
+    """(earliest, latest) settlement statement_date across all settlement rows, or
+    ``(None, None)`` if none parse. Drives the coverage carry-forward diagnostic."""
+    from datetime import datetime
+
+    dates = []
+    for table in export.settlements:
+        col = table.columns.get("statement_date")
+        if not col:
+            continue
+        for value in table.frame[col]:
+            s = str(value).replace("\t", "").strip()
+            if s and s.lower() not in ("nan", "none"):
+                try:
+                    dates.append(datetime.strptime(s, "%Y/%m/%d").date())
+                except ValueError:
+                    pass
+    return (min(dates), max(dates)) if dates else (None, None)
+
+
 def fetch_tiktok(settlement_paths, cancellation_path) -> RawExport:
     """The (slow) ingestion step: read the files into raw rows + content hashes.
 

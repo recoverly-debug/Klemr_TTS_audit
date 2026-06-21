@@ -19,9 +19,13 @@ from klemr.canonical.provenance import Provenance, SourceRef
 from klemr.claims.raf_1a import RafAutoCancelClaim
 from klemr.claims.state import ClaimState
 from klemr.gates.confidence import ConfidenceLevel
+from klemr.ledger import EvidenceLedger, replay, verify_finding
 from klemr.normalization.entity import OrderRecord
-from klemr.normalization.pipeline import settlement_order_ids
-from klemr.reconciliation import apply_resolutions, reconcile
+from klemr.normalization.pipeline import (
+    settlement_order_ids,
+    settlement_statement_window,
+)
+from klemr.reconciliation import apply_resolutions, reconcile, recheck_next_settlement
 from klemr.rules import default_rule_store
 
 from tests.conftest import RESOLUTIONS
@@ -158,6 +162,66 @@ def _record(oid, tracking, cancelled):
     raf = Charge(order_id=oid, charge_type=ChargeType.REFUND_ADMINISTRATION_FEE,
                  amount="-1.00", provenance=prov)
     return OrderRecord(order_id=oid, cancellation=ev, charges=(raf,))
+
+
+def test_verified_funnel_through_the_ledger(recon, resolutions, rule):
+    ledger = EvidenceLedger(":memory:")
+    at = datetime(2026, 6, 17, 12, 0, 0)
+    for f in recon.findings:
+        verify_finding(ledger, f, resolutions[f.credit_match_key.order_id],
+                       rule=rule, reviewer="haus-qa", resolved_at=at,
+                       evidence_ref=f"{f.credit_match_key.order_id}.png")
+    # 30 resolutions written; 30 state transitions (all needs_verification -> filable/dismissed)
+    assert sum(ledger.count(t) for t in ["resolutions"]) == 30
+    assert ledger.count("transitions") == 30
+
+    final = replay(ledger, recon.findings, rule)
+    filable = [f for f in final if f.state is ClaimState.FILABLE]
+    dismissed = [f for f in final if f.state is ClaimState.DISMISSED]
+    held = [f for f in final if f.state is ClaimState.HELD]
+
+    assert len(filable) == 23
+    assert sum((f.ceiling_amount for f in filable), Decimal("0.00")) == Decimal("15.72")
+    assert len(dismissed) == 7
+    assert sum((f.ceiling_amount for f in dismissed), Decimal("0.00")) == Decimal("4.89")
+    assert len(held) == 0
+    assert len(filable) + len(dismissed) + len(held) == 30
+
+    # recovery axis: HIGH on exactly the 23 filable, LOW on the 7 dismissed
+    high = [f for f in final if f.confidence.recovery is ConfidenceLevel.HIGH]
+    assert len(high) == 23 and all(f.state is ClaimState.FILABLE for f in high)
+    assert all(f.confidence.recovery is ConfidenceLevel.LOW for f in dismissed)
+    ledger.close()
+
+
+def test_detection_plus_ledger_replay_is_deterministic(recon, resolutions, rule):
+    ledger = EvidenceLedger(":memory:")
+    at = datetime(2026, 6, 17, 12, 0, 0)
+    for f in recon.findings:
+        verify_finding(ledger, f, resolutions[f.credit_match_key.order_id],
+                       rule=rule, reviewer="qa", resolved_at=at)
+    a = replay(ledger, recon.findings, rule)
+    b = replay(ledger, recon.findings, rule)
+    assert [(f.finding_id, f.state, f.ceiling_amount) for f in a] == \
+           [(f.finding_id, f.state, f.ceiling_amount) for f in b]
+    ledger.close()
+
+
+def test_coverage_carryforward_persists_the_10_without_touching_findings(
+    recon, canonical_dataset, tiktok_export
+):
+    _, latest = settlement_statement_window(tiktok_export)
+    notes = recheck_next_settlement(canonical_dataset, recon.not_in_settlement, latest)
+    assert len(notes) == 10  # bucket (a): cancelled after the settlement window
+
+    ledger = EvidenceLedger(":memory:")
+    ledger.record_coverage_carryforward(recon.run_fingerprint, notes)
+    persisted = ledger.coverage_carryforward(recon.run_fingerprint)
+    assert len(persisted) == 10
+    # they are NOT findings and never enter the funnel
+    finding_orders = {f.credit_match_key.order_id for f in recon.findings}
+    assert {n.order_id for n in notes}.isdisjoint(finding_orders)
+    ledger.close()
 
 
 def test_gate2_filters_a_buyer_shipped_order(claim, rule):

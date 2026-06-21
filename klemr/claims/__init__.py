@@ -9,6 +9,8 @@ from klemr.claims.state import (
     ALLOWED_TRANSITIONS,
     TERMINAL_STATES,
     ClaimState,
+    IllegalTransition,
+    assert_transition,
     can_transition,
     is_terminal,
 )
@@ -29,6 +31,8 @@ __all__ = [
     "ClaimState",
     "ALLOWED_TRANSITIONS",
     "TERMINAL_STATES",
+    "IllegalTransition",
+    "assert_transition",
     "can_transition",
     "is_terminal",
     "default_registry",

@@ -227,33 +227,37 @@ def _anomaly_codes(oid, raf_lines, charges, claim, rule, sink: list[Anomaly]) ->
 _RECOVERY_HIGH = {"recovery": ConfidenceLevel.HIGH}
 
 
+def resolve_finding(finding: Finding, raw: object, rule: Rule) -> Finding:
+    """Pure: map a verified Gate-3 resolution to the updated finding.
+
+    Classification goes THROUGH the rule's resolution_policy (the only resolution ->
+    outcome path). A non-decisive value (empty / "other" / a buyer reason) is NEVER
+    auto-resolved — the finding stays in ``needs_verification`` (recovery LOW). This is
+    the single source of the classify->state mapping, shared by the in-memory
+    ``apply_resolutions`` and the ledger verify flow.
+    """
+    if raw is None or not str(raw).strip():
+        return finding
+    policy = rule.resolution_policy
+    outcome = policy.classify(raw)
+    if outcome is policy.filable:
+        return finding.model_copy(update={
+            "state": ClaimState.FILABLE,
+            "confidence": finding.confidence.model_copy(update=_RECOVERY_HIGH),
+        })
+    if outcome is policy.dismissed:
+        return finding.model_copy(update={
+            "state": ClaimState.DISMISSED,
+            "tier2_appeal_candidate": "tier2_appeal_candidate" in outcome.flags,
+        })
+    return finding  # non-decisive -> stays needs_verification, never auto-resolved
+
+
 def apply_resolutions(
     findings, resolutions: dict[str, str], rule: Rule
 ) -> list[Finding]:
-    """Transition findings by their verified Gate-3 resolution.
-
-    ``resolutions`` maps order_id -> raw resolution string. Classification goes
-    THROUGH the rule store's resolution_policy (the only resolution -> outcome path);
-    a finding with no resolution stays in ``needs_verification``.
-    """
-    policy = rule.resolution_policy
-    out: list[Finding] = []
-    for finding in findings:
-        raw = resolutions.get(finding.credit_match_key.order_id)
-        if raw is None or not str(raw).strip():
-            out.append(finding)  # unresolved -> stays needs_verification
-            continue
-        outcome = policy.classify(raw)
-        if outcome is policy.filable:
-            out.append(finding.model_copy(update={
-                "state": ClaimState.FILABLE,
-                "confidence": finding.confidence.model_copy(update=_RECOVERY_HIGH),
-            }))
-        elif outcome is policy.dismissed:
-            out.append(finding.model_copy(update={
-                "state": ClaimState.DISMISSED,
-                "tier2_appeal_candidate": "tier2_appeal_candidate" in outcome.flags,
-            }))
-        else:
-            out.append(finding.model_copy(update={"state": ClaimState.REVIEW}))
-    return out
+    """In-memory convenience: resolve each finding by its order_id resolution."""
+    return [
+        resolve_finding(f, resolutions.get(f.credit_match_key.order_id), rule)
+        for f in findings
+    ]
