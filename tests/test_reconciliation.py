@@ -225,6 +225,19 @@ def test_coverage_carryforward_persists_the_10_without_touching_findings(
     ledger.close()
 
 
+def test_ambiguous_shipping_timing_is_held_as_anomaly_not_flagged(claim, rule):
+    # buyer order with a tracking anchor but NO cancel time -> cannot prove pre-shipment.
+    prov = Provenance(sources=(SourceRef(source_file="x.csv", content_sha256="0" * 64),))
+    ev = CancellationEvent(order_id="AMB", initiated_by=Party.BUYER,
+                           tracking_uploaded_at=datetime(2026, 5, 1), cancelled_at=None, provenance=prov)
+    raf = Charge(order_id="AMB", charge_type=ChargeType.REFUND_ADMINISTRATION_FEE,
+                 amount="-1.00", provenance=prov)
+    ds = SimpleNamespace(by_order={"AMB": OrderRecord("AMB", ev, (raf,))}, sources=())
+    res = reconcile(ds, claim, rule, domain={"AMB"}, as_of=date(2026, 6, 1))
+    assert res.flagged == 0  # never a candidate on unknown timing
+    assert any(a.code == "AMBIGUOUS_SHIPPING_TIMING" for a in res.anomalies)
+
+
 def test_gate2_filters_a_buyer_shipped_order(claim, rule):
     # Both BUYER-initiated + carry a RAF. Only the pre-ship one should flag; the one
     # whose tracking precedes the cancel is shipped -> out of scope -> no finding.

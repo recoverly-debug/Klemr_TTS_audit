@@ -74,8 +74,29 @@ def test_tampered_hash_is_flagged(tmp_path):
             update={"recovery": ConfidenceLevel.HIGH}),
     })
     r = build_packet([f], rule_store=default_rule_store(), ledger=EvidenceLedger(":memory:"),
-                     run_date=date(2026, 6, 17), run_fingerprint="fp", out_path=tmp_path / "p.pdf")
+                     run_date=date(2026, 6, 17), run_fingerprint="fp", out_path=tmp_path / "p.pdf",
+                     validate_against_ledger=False)  # isolate the display-layer hash check
     assert r.hash_matches is False  # citation still resolves, but integrity line warns
+
+
+def test_projection_finding_without_ledger_resolution_is_rejected(tmp_path):
+    # a filable-looking finding with NO recorded ledger resolution (an in-memory
+    # projection) must never become a packet — "never filable on a guess".
+    f = _finding("P", "1.00").model_copy(update={"state": ClaimState.FILABLE})
+    with pytest.raises(ValueError):
+        build_packet([f], rule_store=default_rule_store(), ledger=EvidenceLedger(":memory:"),
+                     run_date=date(2026, 6, 17), run_fingerprint="fp", out_path=tmp_path / "p.pdf")
+
+
+def test_require_evidence_fails_hard_on_missing_screenshot(tmp_path):
+    ledger = EvidenceLedger(":memory:")
+    f = _verify(ledger, _finding("NOPIC", "1.00"), "auto_approved", evidence_ref=None)
+    # draft mode (default) still renders with a placeholder; finalize mode refuses
+    build_packet([f], rule_store=default_rule_store(), ledger=ledger, run_date=date(2026, 6, 17),
+                 run_fingerprint="fp", out_path=tmp_path / "draft.pdf")  # ok
+    with pytest.raises(ValueError):
+        build_packet([f], rule_store=default_rule_store(), ledger=ledger, run_date=date(2026, 6, 17),
+                     run_fingerprint="fp", out_path=tmp_path / "final.pdf", require_evidence=True)
 
 
 def test_missing_evidence_ref_renders_pending_not_faked(tmp_path):

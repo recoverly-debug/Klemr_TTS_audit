@@ -50,16 +50,25 @@ def verify_finding(
 ) -> VerifyResult:
     """Record a verified Gate-3 resolution and apply the resulting state transition.
 
-    Idempotent: re-applying the SAME value as the finding's latest resolution is a
-    no-op (no new rows). A different value is an append-only correction (a new row;
-    latest wins). An illegal resulting transition raises before anything is written.
+    Idempotent only over the FULL evidentiary act — value + evidence_ref + source. A
+    true duplicate (same value, same evidence, same source) is a no-op; the SAME
+    decision with NEW evidence (e.g. a screenshot attached later) appends a new row so
+    evidence can be augmented (it just doesn't re-transition, since the state is
+    unchanged). A different value is an append-only correction (latest wins). An illegal
+    resulting transition raises before anything is written.
     """
     if not str(resolved_value).strip():
         raise ValueError("resolved_value is required (verification is a recorded action)")
 
     latest = ledger.latest_resolution(finding.finding_id)
-    if latest is not None and latest.resolved_value == resolved_value:
-        return VerifyResult(finding, None, None, no_op=True)  # same decision -> no-op
+    is_exact_duplicate = (
+        latest is not None
+        and latest.resolved_value == resolved_value
+        and latest.evidence_ref == evidence_ref
+        and latest.source == source
+    )
+    if is_exact_duplicate:
+        return VerifyResult(finding, None, None, no_op=True)  # nothing new to record
 
     updated = resolve_finding(finding, resolved_value, rule)
     changed = updated.state != finding.state

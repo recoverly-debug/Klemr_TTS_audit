@@ -89,3 +89,16 @@ class CancellationEvent(CommerceEvent):
         if self.tracking_uploaded_at is None or self.cancelled_at is None:
             return False
         return self.tracking_uploaded_at < self.cancelled_at
+
+    @property
+    def shipping_timing_known(self) -> bool:
+        """Whether pre-shipment is *determinable* from the timestamps.
+
+        Unknown only when a tracking anchor exists but the cancellation time is missing —
+        then we cannot prove the anchor preceded the cancel, and ``shipped_before_cancel``
+        returning ``False`` must NOT be read as "pre-shipment". No tracking anchor at all
+        is unambiguously pre-shipment (known).
+        """
+        if self.tracking_uploaded_at is None:
+            return True
+        return self.cancelled_at is not None

@@ -123,6 +123,23 @@ def normalize_cancellations(
         when_raw = _first_nonblank(sub[cols["cancelled_time"]]) if has_when else ""
         reason = _first_nonblank(sub[cols["reason"]]) if has_reason else ""
 
+        # surface intra-order contradictions on eligibility fields — don't let a first-row
+        # heuristic silently decide Gate 1/2 (the value used is the first non-blank).
+        for field in ("cancel_by", "rts_time", "cancelled_time"):
+            if field not in cols:
+                continue
+            distinct = {_clean_cell(v) for v in sub[cols[field]] if not _is_blank(v)}
+            if len(distinct) > 1:
+                issues.append(NormalizationIssue(
+                    src.basename, oid, field, " | ".join(sorted(distinct)),
+                    "conflicting values across SKU rows; used first non-blank — verify"))
+        # coverage diagnostic: an unrecognized Cancel By isn't 1a-eligible (safe), but a
+        # vocabulary change (e.g. User -> Customer) would silently shrink yield, so flag it.
+        if by_raw and _party(by_raw) is Party.OTHER:
+            issues.append(NormalizationIssue(
+                src.basename, oid, "cancel_by", by_raw,
+                "unrecognized Cancel By -> Party.OTHER (not 1a-eligible); coverage check"))
+
         try:
             tracking_uploaded_at = _parse_dt(rts_raw)
         except ValueError:

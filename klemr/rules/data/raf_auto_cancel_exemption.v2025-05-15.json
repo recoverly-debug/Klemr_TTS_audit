@@ -59,7 +59,7 @@
     "filable": {
       "resolution": "auto_approved",
       "tier": "filable_tier1",
-      "aliases": ["auto_approved", "autoapproved", "auto-approved", "auto", "approved"]
+      "aliases": ["auto_approved", "autoapproved", "auto-approved"]
     },
     "dismissed": {
       "resolution": "seller_canceled",

@@ -100,9 +100,10 @@ class RafAutoCancelClaim(ClaimType):
         ``shipped_before_cancel`` (tracking uploaded *strictly before* the cancel —
         tracking at the exact cancel instant does not count as shipped); the
         *interpretation* that this disqualifies a claim is the plugin's, not the
-        event's.
+        event's. Ambiguous timing (a tracking anchor present but no cancel time) is NOT
+        treated as pre-shipment — it fails the gate and is held as an anomaly upstream.
         """
-        return not event.shipped_before_cancel
+        return event.shipping_timing_known and not event.shipped_before_cancel
 
     def in_scope(self, event: CancellationEvent) -> bool:
         """Gates 1 AND 2 — the data-derivable scope for RAF-1a.

@@ -133,6 +133,23 @@ def test_resolving_against_the_wrong_rule_raises_and_writes_nothing(ledger):
     assert ledger.count("resolutions") == 0 and ledger.count("transitions") == 0
 
 
+def test_same_decision_with_new_evidence_appends_not_noop(ledger):
+    # auto_approved recorded first WITHOUT a screenshot, then the screenshot is attached
+    # later for the same decision -> a new row (evidence not lost), no extra transition.
+    f = _finding("E1")
+    r1 = verify_finding(ledger, f, "auto_approved", rule=RULE, reviewer="qa",
+                        resolved_at=AT, evidence_ref=None)
+    r2 = verify_finding(ledger, r1.finding, "auto_approved", rule=RULE, reviewer="qa",
+                        resolved_at=AT, evidence_ref="E1.png")
+    assert r2.no_op is False
+    assert ledger.count("resolutions") == 2 and ledger.count("transitions") == 1
+    assert ledger.latest_resolution(f.finding_id).evidence_ref == "E1.png"
+    # a true exact duplicate (same value + evidence + source) is still a no-op
+    r3 = verify_finding(ledger, r2.finding, "auto_approved", rule=RULE, reviewer="qa",
+                        resolved_at=AT, evidence_ref="E1.png")
+    assert r3.no_op is True and ledger.count("resolutions") == 2
+
+
 def test_correction_is_a_new_row_and_latest_wins(ledger):
     f = _finding("O7")
     # a non-decisive first pass (legal: stays needs_verification), then a decisive correction

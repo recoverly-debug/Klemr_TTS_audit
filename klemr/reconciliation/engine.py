@@ -118,6 +118,17 @@ def reconcile(
         ]
         raf_total = sum((c.deduction_magnitude for c in raf_lines), Decimal("0.00"))
 
+        # Decisive timing unknown (tracking present, cancel time missing): we cannot prove
+        # pre-shipment, so a buyer order with RAF is HELD as an anomaly — never silently
+        # converted into a candidate or mislabeled "shipped".
+        if claim.gate1_buyer_initiated(event) and not event.shipping_timing_known:
+            if raf_total > 0:
+                anomalies.append(Anomaly(
+                    oid, "AMBIGUOUS_SHIPPING_TIMING",
+                    "tracking present but cancellation time missing — cannot prove "
+                    "pre-shipment; held from candidates pending verification"))
+            continue
+
         if not claim.in_scope(event):
             # out-of-scope cancellation that still carried RAF -> informational, NOT a finding
             if raf_total > 0:
@@ -130,6 +141,9 @@ def reconcile(
         if raf_total <= 0:
             continue  # in scope but no RAF charged -> nothing to recover (not flagged)
 
+        # Order-level maturity keyed to the LATEST RAF statement date — deliberately
+        # conservative: a multi-line order matures with its newest fee row. Maturity is a
+        # per-finding flag (not per-line); line-level maturity is a future refinement.
         statement_date = max(
             (c.statement_date for c in raf_lines if c.statement_date), default=None
         )
@@ -216,7 +230,9 @@ def _anomaly_codes(oid, raf_lines, charges, claim, rule, sink: list[Anomaly]) ->
             sink.append(Anomaly(oid, "RAF_LINE_EXCEEDS_CAP",
                                 f"RAF line ${line.deduction_magnitude} exceeds ${cap}/SKU cap"))
             break
-    # 2) order RAF above ~20% of referral (only meaningful when referral is present)
+    # 2) order RAF above ~20% of referral. Best-effort, INFORMATIONAL only (never routes a
+    #    claim): the per-SKU cap is approximated by RAF line count when SKU-level referral
+    #    grouping isn't available. Not recovery sizing.
     referral = sum(
         (c.deduction_magnitude if c.is_deduction else abs(c.amount)
          for c in charges if c.charge_type is ChargeType.REFERRAL_FEE),

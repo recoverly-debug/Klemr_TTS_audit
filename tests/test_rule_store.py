@@ -66,7 +66,8 @@ def test_three_gates_and_gate3_not_in_data(store):
     [
         ("auto_approved", "filable_tier1"),
         ("Auto-Approved", "filable_tier1"),
-        ("approved", "filable_tier1"),
+        ("approved", "needs_review"),  # ambiguous: "approved by whom?" -> never auto-filable
+        ("auto", "needs_review"),      # ditto
         ("seller_canceled", "dismissed"),  # Gate 3 = NOT exempt -> terminal dismissed
         ("Seller Canceled", "dismissed"),
         ("manual", "dismissed"),

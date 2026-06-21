@@ -160,6 +160,20 @@ def test_invalid_money_cell_is_quarantined_not_dropped():
     assert any(i.field == "raf" and "non-numeric" in i.detail for i in issues)  # surfaced, not silent
 
 
+def test_conflicting_sku_rows_and_unknown_party_are_surfaced():
+    export = _mini_cancellations([
+        {"Order ID": "900", "Cancel By": "User", "RTS Time": "",
+         "Cancelled Time": "06/16/2026 7:54:44 PM", "Cancel Reason": "x"},
+        {"Order ID": "900", "Cancel By": "Seller", "RTS Time": "",  # conflict vs row above
+         "Cancelled Time": "06/16/2026 7:54:44 PM", "Cancel Reason": "x"},
+        {"Order ID": "901", "Cancel By": "Robot", "RTS Time": "",   # unrecognized party
+         "Cancelled Time": "06/16/2026 7:54:44 PM", "Cancel Reason": "y"},
+    ])
+    _, issues = normalize_cancellations(export)
+    assert any(i.order_id == "900" and i.field == "cancel_by" and "conflicting" in i.detail for i in issues)
+    assert any(i.order_id == "901" and i.field == "cancel_by" and "unrecognized" in i.detail for i in issues)
+
+
 def test_blank_order_id_is_quarantined_as_issue():
     export = _mini_cancellations([
         {"Order ID": "123\t", "Cancel By": "User", "RTS Time": "",

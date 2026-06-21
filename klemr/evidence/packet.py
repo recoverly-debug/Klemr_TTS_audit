@@ -123,6 +123,8 @@ def build_packet(
     chrome_crop_top: float = 0.12,
     chrome_crop_right: float = 0.035,
     chrome_crop_min_aspect: float = 1.4,
+    validate_against_ledger: bool = True,
+    require_evidence: bool = False,
 ) -> PacketResult:
     """Render the packet. Deterministic: same inputs -> identical bytes (invariant on).
 
@@ -157,7 +159,8 @@ def build_packet(
     sample = (tier1 or tier2)[0]
     rule = rule_store.get(sample.rule_id, sample.rule_version)
     rule_hash = rule.content_hash()
-    hash_matches = all(f.rule_content_hash == rule_hash for f in findings)
+    # integrity line covers the RENDERED claims only (not unrelated input findings)
+    hash_matches = all(f.rule_content_hash == rule_hash for f in (*tier1, *tier2))
 
     # maturity window comes from rule data (parameters), not a constant
     maturity_days = rule.parameters.maturity_days
@@ -170,6 +173,23 @@ def build_packet(
 
     # resolve each filable finding's verified resolution + screenshot
     resolutions = {f.finding_id: ledger.latest_resolution(f.finding_id) for f in tier1}
+
+    # TRUST BOUNDARY (#8): every Tier-1 claim must be backed by a recorded ledger
+    # resolution that classifies as filable — never an in-memory projection. "A claim is
+    # never filable on a guess." Disable only to test the display layer in isolation.
+    if validate_against_ledger:
+        unbacked = [
+            f.credit_match_key.order_id for f in tier1
+            if resolutions[f.finding_id] is None
+            or rule.resolution_policy.classify(resolutions[f.finding_id].resolved_value)
+            is not rule.resolution_policy.filable
+        ]
+        if unbacked:
+            raise ValueError(
+                f"build_packet: {len(unbacked)} Tier-1 finding(s) lack a filable ledger "
+                f"resolution and cannot be attested: {unbacked}."
+            )
+
     shots: dict[str, str | None] = {}
     pending: list[str] = []
     for f in tier1:
@@ -178,6 +198,15 @@ def build_packet(
         shots[f.finding_id] = path
         if path is None:
             pending.append(f.credit_match_key.order_id)
+
+    # FINALIZATION GATE (#2): a *filing* packet must have every exhibit. Default off keeps
+    # the draft behavior (render "EXHIBIT PENDING" + list on cover); require_evidence=True
+    # makes finalization fail hard rather than emit a packet with missing proof.
+    if require_evidence and pending:
+        raise ValueError(
+            f"build_packet(require_evidence=True): {len(pending)} filable order(s) have no "
+            f"Seller Center exhibit: {pending}. Capture the screenshots before finalizing."
+        )
 
     ss = getSampleStyleSheet()
 
