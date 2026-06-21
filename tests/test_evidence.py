@@ -28,7 +28,7 @@ PROV = Provenance(sources=(SourceRef(source_file="c.csv", content_sha256="0" * 6
 AT = datetime(2026, 6, 17, 12, 0, 0)
 
 
-def _finding(order_id, ceiling, content_hash=None) -> Finding:
+def _finding(order_id, ceiling, content_hash=None, mature=True, fresh=False) -> Finding:
     h = content_hash or RULE.content_hash()
     return Finding(
         finding_id=make_finding_id("raf-1a", order_id, h),
@@ -36,7 +36,7 @@ def _finding(order_id, ceiling, content_hash=None) -> Finding:
         rule_content_hash=h, provenance=PROV, ceiling_amount=Decimal(ceiling),
         credit_match_key=CreditMatchKey(order_id=order_id, charge_class="refund_administration_fee"),
         confidence=Confidence.for_unverified_candidate(), state=ClaimState.NEEDS_VERIFICATION,
-        mature=True, fresh=False,
+        mature=mature, fresh=fresh,
     )
 
 
@@ -79,6 +79,31 @@ def test_missing_evidence_ref_renders_pending_not_faked(tmp_path):
                      out_path=tmp_path / "p.pdf", screenshots_dir="fixtures/screenshots")
     assert r.pending_orders == ["NOPIC"]
     assert r.real_screenshots == 0  # never a fabricated image
+
+
+def test_ripe_now_split_is_row_sums_summing_to_total(tmp_path):
+    ledger = EvidenceLedger(":memory:")
+    fm = _verify(ledger, _finding("M", "4.00", mature=True), "auto_approved", None)
+    fi = _verify(ledger, _finding("I", "1.00", mature=False, fresh=True), "auto_approved", None)
+    r = build_packet([fm, fi], rule_store=default_rule_store(), ledger=ledger,
+                     run_date=date(2026, 6, 17), run_fingerprint="fp", out_path=tmp_path / "p.pdf")
+    assert r.tier1_mature_total == Decimal("4.00") and r.tier1_mature_count == 1
+    assert r.tier1_maturing_total == Decimal("1.00") and r.tier1_maturing_count == 1
+    # maturity is a split of the SAME total, not a new number
+    assert r.tier1_mature_total + r.tier1_maturing_total == r.tier1_total == Decimal("5.00")
+
+
+def test_full_window_screenshot_is_cropped_but_clean_capture_is_not(tmp_path):
+    from PIL import Image as _Img
+    wide = tmp_path / "wide.png"; _Img.new("RGB", (1600, 900), "white").save(wide)   # full window (1.78)
+    tall = tmp_path / "tall.png"; _Img.new("RGB", (800, 1000), "white").save(tall)   # clean capture (0.8)
+    ledger = EvidenceLedger(":memory:")
+    f1 = _verify(ledger, _finding("WIDE", "1.00"), "auto_approved", str(wide))
+    f2 = _verify(ledger, _finding("TALL", "1.00"), "auto_approved", str(tall))
+    r = build_packet([f1, f2], rule_store=default_rule_store(), ledger=ledger,
+                     run_date=date(2026, 6, 17), run_fingerprint="fp", out_path=tmp_path / "p.pdf")
+    assert r.cropped_screenshots == 1  # only the full-window capture; clean capture left intact
+    assert r.real_screenshots == 2 and r.pending_orders == []
 
 
 def test_determinism_same_inputs_identical_bytes(tmp_path):
@@ -129,3 +154,8 @@ def test_full_packet_23_pages_and_row_sum_totals(verified, tmp_path):
     assert r.tier2_count == 7 and r.tier2_total == Decimal("4.89")
     assert r.hash_matches is True
     assert r.real_screenshots == 23 and r.pending_orders == []
+    # ripe-now split (row-sums of the maturity flag) sums back to the unchanged total
+    assert r.tier1_mature_count == 17 and r.tier1_mature_total == Decimal("11.84")
+    assert r.tier1_maturing_count == 6 and r.tier1_maturing_total == Decimal("3.88")
+    assert r.tier1_mature_total + r.tier1_maturing_total == Decimal("15.72")
+    assert r.cropped_screenshots == 23  # all fixture exhibits are full-window captures

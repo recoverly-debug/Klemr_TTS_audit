@@ -15,10 +15,10 @@ checkmarks/sub/superscripts, which would render as black boxes.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image as PILImage
@@ -65,6 +65,12 @@ class PacketResult:
     real_screenshots: int
     rule_content_hash: str
     hash_matches: bool
+    # ripe-now split of the filable total (informational maturity flag, not a state)
+    tier1_mature_total: Decimal = Decimal("0.00")
+    tier1_maturing_total: Decimal = Decimal("0.00")
+    tier1_mature_count: int = 0
+    tier1_maturing_count: int = 0
+    cropped_screenshots: int = 0
     pending_orders: list[str] = field(default_factory=list)
 
 
@@ -81,6 +87,25 @@ def _resolve_screenshot(evidence_ref, screenshots_dir):
     return str(p) if p.exists() else None
 
 
+def _load_exhibit(path, crop_top, crop_right, min_aspect):
+    """Open a screenshot and, ONLY for landscape full-window captures, crop the
+    browser chrome (top band) and right-edge assistant overlay. Returns
+    ``(BytesIO_or_path, width, height, cropped)``. Never upscales or distorts; if the
+    capture isn't full-window (aspect < min_aspect), it is embedded uncropped.
+    """
+    with PILImage.open(path) as im:
+        im.load()
+        w, h = im.size
+        if w / h < min_aspect or (crop_top <= 0 and crop_right <= 0):
+            return path, w, h, False  # not a full-window capture -> embed as-is
+        box = (0, int(h * crop_top), w - int(w * crop_right), h)
+        cropped = im.crop(box)
+        buf = BytesIO()
+        cropped.save(buf, format="PNG")  # deterministic re-encode
+        buf.seek(0)
+        return buf, cropped.size[0], cropped.size[1], True
+
+
 def build_packet(
     findings,
     *,
@@ -95,8 +120,19 @@ def build_packet(
     screenshots_dir=None,
     charge_lines: dict | None = None,
     funnel: dict | None = None,
+    chrome_crop_top: float = 0.12,
+    chrome_crop_right: float = 0.035,
+    chrome_crop_min_aspect: float = 1.4,
 ) -> PacketResult:
-    """Render the packet. Deterministic: same inputs -> identical bytes (invariant on)."""
+    """Render the packet. Deterministic: same inputs -> identical bytes (invariant on).
+
+    ``chrome_crop_*`` are a SAFETY NET (Fix 2): a stray full-window screenshot has its
+    browser chrome (top tabs/bookmarks/address bar) and right-edge assistant overlay
+    cropped before embedding, so analyst desktop context never reaches a client doc.
+    Cropping only trims non-content margins and only applies to landscape full-window
+    captures (aspect >= ``chrome_crop_min_aspect``) — it never distorts, upscales, or
+    removes order-history content. The durable fix is clean capture (see the SOP).
+    """
     rl_config.invariant = 1  # fixed PDF id + creation date -> reproducible output
 
     tier1 = sorted(
@@ -117,6 +153,15 @@ def build_packet(
     rule = rule_store.get(sample.rule_id, sample.rule_version)
     rule_hash = rule.content_hash()
     hash_matches = all(f.rule_content_hash == rule_hash for f in findings)
+
+    # maturity window comes from rule data (parameters), not a constant
+    maturity_days = rule.parameters.maturity_days
+    fresh_days = rule.parameters.fresh_days
+    # ripe-now split of the filable total (row-sums over the informational flag)
+    t1_mature = sum((f.ceiling_amount for f in tier1 if f.mature), Decimal("0.00"))
+    t1_maturing = t1_total - t1_mature
+    n_mature = sum(1 for f in tier1 if f.mature)
+    n_maturing = len(tier1) - n_mature
 
     # resolve each filable finding's verified resolution + screenshot
     resolutions = {f.finding_id: ledger.latest_resolution(f.finding_id) for f in tier1}
@@ -185,7 +230,15 @@ def build_packet(
     kpi.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), LIGHT), ("BOX", (0, 0), (-1, -1), 0.5, LINE),
         ("LINEAFTER", (0, 0), (-2, -1), 0.5, LINE), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 12), ("BOTTOMPADDING", (0, 0), (-1, -1), 12)]))
-    story += [kpi, Spacer(1, 16), Paragraph("What this packet contains", st_h2),
+    ripe = Table([[Paragraph(
+        f"<b>Tier-1 readiness</b> (of {_money(t1_total)}):  "
+        f"<b>{_money(t1_mature)}</b> ready to file now — {n_mature} mature orders  ·  "
+        f"<b>{_money(t1_maturing)}</b> maturing — {n_maturing} orders for the next wave.", st_sm)]],
+        colWidths=[CW])
+    ripe.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), LIGHT), ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9), ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    story += [kpi, Spacer(1, 8), ripe, Spacer(1, 16), Paragraph("What this packet contains", st_h2),
               Paragraph(f"{len(tier1)} TikTok Shop orders on which a Refund Administration Fee (RAF) was "
                         "deducted even though the order qualified for the auto-cancellation exemption "
                         "(buyer-initiated, pre-shipment, resolved by TikTok's 24-hour auto-approval SLA). "
@@ -253,13 +306,24 @@ def build_packet(
         f"{f_flagged} flagged (RAF charged)",
         f"{len(tier1)} Tier-1 filable",
     ]))
+    legend = (f"<b>Maturity</b> (informational flag, NOT a filing state). "
+              f"<b>Mature</b> = settled {maturity_days}+ days ago, past TikTok's settlement-reconciliation "
+              f"window — ready to file now. <b>Maturing</b> = settled within the last {maturity_days} days "
+              f"(<b>Fresh</b> = within {fresh_days} days); re-verify and file in the next wave once past the "
+              f"window. All {len(tier1)} orders here are filable; maturity only sequences when to file.")
+    leg = Table([[Paragraph(legend, st_sm)]], colWidths=[CW])
+    leg.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), TEALLT), ("BOX", (0, 0), (-1, -1), 0.5, TEAL),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9), ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
     story += [gt, Spacer(1, 14), Paragraph("How the funnel narrowed", st_h2),
               Paragraph(narrowing, st_sub),
               Paragraph(f"({len(tier2)} flagged orders were verified seller-canceled — see Tier 2.)", st_sm),
+              Spacer(1, 12), Paragraph("Maturity legend", st_h2), leg,
               PageBreak()]
 
     # ---------------- 23 EVIDENCE PAGES ----------------
     n = len(tier1)
+    cropped_count = 0
     for i, f in enumerate(tier1):
         res = resolutions[f.finding_id]
         amt = f.ceiling_amount
@@ -276,7 +340,9 @@ def build_packet(
         reviewer = res.reviewer if res else "(missing)"
         facts = Table([
             [Paragraph("RECOVERABLE RAF", st_lbl), Paragraph(_money(amt), st_val),
-             Paragraph("MATURITY", st_lbl), Paragraph("mature" if f.mature else ("fresh — 2nd wave" if f.fresh else "immature"), st_val)],
+             Paragraph("MATURITY", st_lbl),
+             Paragraph("Mature — file now" if f.mature
+                       else (f"Maturing — fresh (&lt;{fresh_days}d)" if f.fresh else "Maturing — next wave"), st_val)],
             [Paragraph("GATE-3 RESOLUTION", st_lbl), Paragraph(str(res.resolved_value if res else "?"), st_val),
              Paragraph("VERIFIED BY", st_lbl), Paragraph(reviewer, st_val)],
             [Paragraph("RESOLVED AT", st_lbl), Paragraph(str(resolved_at), st_val),
@@ -317,10 +383,11 @@ def build_packet(
 
         shot = shots[f.finding_id]
         if shot:
-            with PILImage.open(shot) as im:
-                iw, ih = im.size
-            scale = min(CW / iw, 360 / ih)
-            pic = Image(shot, width=iw * scale, height=ih * scale)
+            src, iw, ih, was_cropped = _load_exhibit(
+                shot, chrome_crop_top, chrome_crop_right, chrome_crop_min_aspect)
+            cropped_count += int(was_cropped)
+            scale = min(CW / iw, 360 / ih, 1.0)  # fit, never upscale
+            pic = Image(src, width=iw * scale, height=ih * scale)
             pic.hAlign = "CENTER"
             fr = Table([[pic]], colWidths=[iw * scale])
             fr.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.6, LINE), ("TOPPADDING", (0, 0), (-1, -1), 2),
@@ -374,6 +441,9 @@ def build_packet(
         evidence_pages=len(tier1), total_pages=doc.page,
         real_screenshots=len(tier1) - len(pending),
         rule_content_hash=rule_hash, hash_matches=hash_matches,
+        tier1_mature_total=t1_mature, tier1_maturing_total=t1_maturing,
+        tier1_mature_count=n_mature, tier1_maturing_count=n_maturing,
+        cropped_screenshots=cropped_count,
         pending_orders=pending,
     )
 
