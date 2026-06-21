@@ -188,9 +188,29 @@ class EvidenceLedger:
             raise ValueError(table)
         return int(self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
-    @property
-    def connection(self) -> sqlite3.Connection:
-        return self._conn
+    def triggers_intact(self) -> bool:
+        """Integrity check: confirm the append-only guard triggers still exist.
+
+        The write-capable connection is intentionally NOT exposed, so production code
+        cannot drop a trigger and then mutate. A long-running service can call this at
+        open time to fail fast if a DB file was tampered with out-of-band.
+        """
+        rows = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'"
+        ).fetchall()
+        names = {r["name"] for r in rows}
+        expected = {
+            f"{t}_no_{op}"
+            for t in ("resolutions", "transitions", "coverage_carryforward")
+            for op in ("update", "delete")
+        }
+        return expected <= names
+
+    def __enter__(self) -> "EvidenceLedger":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     def close(self) -> None:
         self._conn.close()

@@ -149,6 +149,11 @@ def build_packet(
     t2_total = sum((f.ceiling_amount for f in tier2), Decimal("0.00"))
 
     # citation comes from the findings' own rule version (and we prove the hash matches)
+    if not tier1 and not tier2:
+        raise ValueError(
+            "build_packet: no filable or Tier-2 findings to render — nothing to attest. "
+            "A run with zero verified findings should be reported as a clean bill, not a packet."
+        )
     sample = (tier1 or tier2)[0]
     rule = rule_store.get(sample.rule_id, sample.rule_version)
     rule_hash = rule.content_hash()

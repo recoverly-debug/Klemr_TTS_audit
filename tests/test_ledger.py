@@ -47,12 +47,21 @@ def ledger():
 def test_ledger_is_append_only(ledger):
     verify_finding(ledger, _finding(), "auto_approved", rule=RULE, reviewer="qa", resolved_at=AT)
     assert ledger.count("resolutions") == 1
+    assert ledger.triggers_intact() is True
+    # no public write-capable connection is exposed
+    assert not hasattr(ledger, "connection")
+    # even reaching the private handle, the triggers block mutation
     with pytest.raises(sqlite3.Error):
-        ledger.connection.execute("UPDATE resolutions SET reviewer='tamper'")
+        ledger._conn.execute("UPDATE resolutions SET reviewer='tamper'")
     with pytest.raises(sqlite3.Error):
-        ledger.connection.execute("DELETE FROM resolutions")
+        ledger._conn.execute("DELETE FROM resolutions")
     with pytest.raises(sqlite3.Error):
-        ledger.connection.execute("UPDATE transitions SET to_state='closed'")
+        ledger._conn.execute("UPDATE transitions SET to_state='closed'")
+
+
+def test_ledger_is_a_context_manager():
+    with EvidenceLedger(":memory:") as lg:
+        assert lg.triggers_intact() is True
 
 
 # ---- the two decisive outcomes ----
@@ -113,6 +122,15 @@ def test_reapplying_same_resolution_is_a_noop(ledger):
     again = verify_finding(ledger, first.finding, "auto_approved", rule=RULE, reviewer="qa", resolved_at=AT)
     assert again.no_op is True
     assert ledger.count("resolutions") == 1 and ledger.count("transitions") == 1
+
+
+def test_resolving_against_the_wrong_rule_raises_and_writes_nothing(ledger):
+    from klemr.reconciliation.engine import RuleProvenanceMismatch
+    tampered = RULE.model_copy(update={"description": "tampered"})  # different content_hash
+    with pytest.raises(RuleProvenanceMismatch):
+        verify_finding(ledger, _finding("Z"), "auto_approved", rule=tampered,
+                       reviewer="qa", resolved_at=AT)
+    assert ledger.count("resolutions") == 0 and ledger.count("transitions") == 0
 
 
 def test_correction_is_a_new_row_and_latest_wins(ledger):

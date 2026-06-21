@@ -25,7 +25,8 @@ from klemr.normalization.pipeline import (
     settlement_order_ids,
     settlement_statement_window,
 )
-from klemr.reconciliation import apply_resolutions, reconcile, recheck_next_settlement
+from klemr.reconciliation import reconcile, recheck_next_settlement
+from klemr.reconciliation.engine import apply_resolutions  # in-memory preview path (not public)
 from klemr.rules import default_rule_store
 
 from tests.conftest import RESOLUTIONS

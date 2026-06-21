@@ -135,6 +135,31 @@ def _mini_cancellations(rows):
     )
 
 
+def _mini_settlement(settlement_rows):
+    can_src = SourceFile(path="c.csv", basename="c.csv", kind="cancellation",
+                         sheet=None, content_sha256="0" * 64)
+    can = RawTable(
+        source=can_src,
+        frame=pd.DataFrame([], columns=["Order ID", "Cancel By", "RTS Time", "Cancelled Time", "Cancel Reason"]),
+        columns={"order_id": "Order ID", "cancel_by": "Cancel By", "rts_time": "RTS Time",
+                 "cancelled_time": "Cancelled Time", "reason": "Cancel Reason"})
+    s_src = SourceFile(path="s.xlsx", basename="s.xlsx", kind="settlement",
+                       sheet="Order details", content_sha256="0" * 64)
+    s = RawTable(source=s_src, frame=pd.DataFrame(settlement_rows).reset_index(drop=True),
+                 columns={"order_id": "Order/adjustment ID", "raf": "Refund administration fee",
+                          "referral": "Referral fee", "sku_id": "SKU ID", "statement_date": "Statement date"})
+    return RawExport(cancellations=can, settlements=(s,))
+
+
+def test_invalid_money_cell_is_quarantined_not_dropped():
+    from klemr.normalization.tiktok import normalize_charges
+    export = _mini_settlement([{"Order/adjustment ID": "123", "Refund administration fee": "abc",
+                                "Referral fee": "0", "SKU ID": "S1", "Statement date": "2026/03/31"}])
+    charges, issues = normalize_charges(export, restrict_to_orders={"123"})
+    assert charges == []  # "abc" is not a charge
+    assert any(i.field == "raf" and "non-numeric" in i.detail for i in issues)  # surfaced, not silent
+
+
 def test_blank_order_id_is_quarantined_as_issue():
     export = _mini_cancellations([
         {"Order ID": "123\t", "Cancel By": "User", "RTS Time": "",

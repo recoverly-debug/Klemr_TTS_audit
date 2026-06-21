@@ -96,6 +96,13 @@ def replay(ledger: EvidenceLedger, findings, rule: Rule) -> list[Finding]:
 
     Deterministic: detection is recomputable and ``latest_resolution`` is stable, so
     detection-rerun + ledger-replay always yields identical states/amounts.
+
+    Semantics — **append order wins**, not wall-clock ``resolved_at``: a correction is a
+    new row, and the most recently *recorded* resolution (highest ``resolution_id``)
+    supersedes earlier ones. This is intentional (an analyst recording a correction now
+    overrides what was recorded before, regardless of the event time they enter). A
+    backfilled resolution carrying an older ``resolved_at`` will still win if it was
+    appended later — by design.
     """
     out: list[Finding] = []
     for finding in findings:

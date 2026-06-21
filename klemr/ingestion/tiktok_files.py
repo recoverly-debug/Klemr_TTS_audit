@@ -128,7 +128,8 @@ class TikTokFileConnector:
         return RawExport(cancellations=cancellations, settlements=settlements)
 
     def _load_cancellations(self, path: Path) -> RawTable:
-        frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+        # utf-8-sig strips a UTF-8 BOM if present (TikTok exports often carry one).
+        frame = pd.read_csv(path, dtype=str, keep_default_na=False, encoding="utf-8-sig")
         frame.columns = [str(c).strip() for c in frame.columns]
         frame = frame.reset_index(drop=True)
         source = SourceFile(
@@ -142,14 +143,14 @@ class TikTokFileConnector:
         return RawTable(source=source, frame=frame, columns=columns)
 
     def _load_settlement(self, path: Path) -> RawTable:
-        xl = pd.ExcelFile(path)
-        sheet = next(
-            (s for s in xl.sheet_names if _norm(s) in {_norm(a) for a in _SETTLE_SHEET_ALIASES}),
-            None,
-        )
-        if sheet is None:
-            sheet = next((s for s in xl.sheet_names if "order" in _norm(s)), xl.sheet_names[0])
-        frame = xl.parse(sheet, dtype=str).reset_index(drop=True)
+        with pd.ExcelFile(path) as xl:  # context manager -> release the workbook handle
+            sheet = next(
+                (s for s in xl.sheet_names if _norm(s) in {_norm(a) for a in _SETTLE_SHEET_ALIASES}),
+                None,
+            )
+            if sheet is None:
+                sheet = next((s for s in xl.sheet_names if "order" in _norm(s)), xl.sheet_names[0])
+            frame = xl.parse(sheet, dtype=str).reset_index(drop=True)
         source = SourceFile(
             path=str(path),
             basename=path.name,

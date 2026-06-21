@@ -1,9 +1,10 @@
 """Canonical charge model.
 
-A ``Charge`` is one money line tied to an order. RAF and referral fees are both
-charges, distinguished by ``charge_type`` — the engine never special-cases a column
-name, only a charge type. Amounts are stored signed (negative = deduction) exactly
-as settlement reports them; magnitude is derived.
+A ``Charge`` is one money line tied to an order, classified by a generic
+``charge_type`` — the engine never special-cases a marketplace column name, only a
+charge class. Each marketplace's fee labels are mapped onto this taxonomy in its
+normalizer. Amounts are stored signed (negative = deduction) exactly as settlement
+reports them; magnitude is derived.
 """
 from __future__ import annotations
 
@@ -18,9 +19,14 @@ from klemr.canonical.provenance import Provenance
 
 
 class ChargeType(str, Enum):
-    """Kinds of settlement money lines the engine understands.
+    """Generic marketplace fee taxonomy (channel-agnostic). A normalizer maps each
+    marketplace's own fee labels onto these classes; new classes are added here without
+    touching the charge model.
 
-    Extensible: other leakage audits add members without touching the charge model.
+    (Review note: these two named fee classes are common across marketplaces but the
+    enum is still an enumerated vocabulary in the canonical layer. A fully open
+    ``charge_type: str`` code — like ``CreditMatchKey.charge_class`` already is — would
+    be even more channel-neutral; deferred as a model-shape decision.)
     """
 
     REFUND_ADMINISTRATION_FEE = "refund_administration_fee"
@@ -55,7 +61,7 @@ class Charge(BaseModel):
     def deduction_magnitude(self) -> Decimal:
         """Positive magnitude of a deduction; ``0`` for non-deductions.
 
-        This is the value the RAF audit recovers: detect.py computes a per-order
-        RAF as the magnitude of the negative ``Refund administration fee`` lines.
+        A claim recovers the magnitude of the negative fee lines it targets (summed per
+        order); how a recovery uses it is the claim plugin's concern, not the model's.
         """
         return -self.amount if self.amount < 0 else Decimal("0.00")

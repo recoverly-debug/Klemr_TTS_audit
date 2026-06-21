@@ -14,7 +14,7 @@ from klemr.canonical.provenance import Provenance, SourceRef
 from klemr.claims.raf_1a import RafAutoCancelClaim
 from klemr.claims.state import ClaimState
 from klemr.evidence import build_packet
-from klemr.gates.confidence import Confidence
+from klemr.gates.confidence import Confidence, ConfidenceLevel
 from klemr.ledger import EvidenceLedger, replay, verify_finding
 from klemr.normalization.pipeline import settlement_order_ids
 from klemr.reconciliation import reconcile
@@ -64,9 +64,16 @@ def test_cover_totals_are_row_sums_and_citation_resolves(tmp_path):
 
 
 def test_tampered_hash_is_flagged(tmp_path):
-    ledger = EvidenceLedger(":memory:")
-    f = _verify(ledger, _finding("X", "1.00", content_hash="deadbeef" * 8), "auto_approved", "x.png")
-    r = build_packet([f], rule_store=default_rule_store(), ledger=ledger,
+    # A filable finding whose recorded rule hash no longer matches the store's rule (e.g.
+    # the rule data changed AFTER this finding was filed). It cannot be (re)resolved — the
+    # provenance guard blocks that — but a previously-filed one still reaches the packet,
+    # whose integrity line must warn. Construct it directly in the filable state.
+    f = _finding("X", "1.00", content_hash="deadbeef" * 8).model_copy(update={
+        "state": ClaimState.FILABLE,
+        "confidence": Confidence.for_unverified_candidate().model_copy(
+            update={"recovery": ConfidenceLevel.HIGH}),
+    })
+    r = build_packet([f], rule_store=default_rule_store(), ledger=EvidenceLedger(":memory:"),
                      run_date=date(2026, 6, 17), run_fingerprint="fp", out_path=tmp_path / "p.pdf")
     assert r.hash_matches is False  # citation still resolves, but integrity line warns
 
@@ -104,6 +111,12 @@ def test_full_window_screenshot_is_cropped_but_clean_capture_is_not(tmp_path):
                      run_date=date(2026, 6, 17), run_fingerprint="fp", out_path=tmp_path / "p.pdf")
     assert r.cropped_screenshots == 1  # only the full-window capture; clean capture left intact
     assert r.real_screenshots == 2 and r.pending_orders == []
+
+
+def test_build_packet_rejects_empty_inputs(tmp_path):
+    with pytest.raises(ValueError):
+        build_packet([], rule_store=default_rule_store(), ledger=EvidenceLedger(":memory:"),
+                     run_date=date(2026, 6, 17), run_fingerprint="fp", out_path=tmp_path / "p.pdf")
 
 
 def test_determinism_same_inputs_identical_bytes(tmp_path):

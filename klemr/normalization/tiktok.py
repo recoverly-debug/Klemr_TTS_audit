@@ -193,14 +193,19 @@ def normalize_charges(
     return charges, issues
 
 
-def _to_decimal_or_none(raw: object) -> Decimal | None:
+_INVALID_MONEY = object()  # sentinel: a non-blank cell that is not a valid number
+
+
+def _to_decimal_or_none(raw: object):
+    """Returns ``None`` for blank, a ``Decimal`` for valid money, or ``_INVALID_MONEY``
+    for a non-blank cell that fails to parse (so it can be quarantined, not dropped)."""
     cleaned = _clean_cell(raw)
     if cleaned.lower() in ("", "nan", "none"):
         return None
     try:
         return Decimal(cleaned)
     except InvalidOperation:
-        return None
+        return _INVALID_MONEY
 
 
 def _charges_from_table(
@@ -253,6 +258,11 @@ def _charges_from_table(
         )
         for key in money_keys:
             value = _to_decimal_or_none(row[cols[key]])
+            if value is _INVALID_MONEY:
+                issues.append(NormalizationIssue(src.basename, oid, key,
+                                                 _clean_cell(row[cols[key]]),
+                                                 "non-numeric money cell; skipped (quarantined)"))
+                continue
             if value is None or value == 0:
                 continue  # blank / $0.00 is not a charge
             charges.append(

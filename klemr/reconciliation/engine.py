@@ -18,6 +18,7 @@ from datetime import date
 from decimal import Decimal
 
 from klemr.canonical.charges import Charge, ChargeType
+from klemr.canonical.money import to_money
 from klemr.canonical.provenance import Provenance, SourceRef
 from klemr.claims.raf_1a import RafAutoCancelClaim
 from klemr.claims.state import ClaimState
@@ -53,7 +54,6 @@ class ReconciliationResult:
     canceled_orders: int
     in_scope: int
     flagged: int
-    ceiling_amount: Decimal
     mature: int
     fresh: int
     anomalies: tuple[Anomaly, ...] = ()
@@ -61,9 +61,15 @@ class ReconciliationResult:
     # period-alignment diagnostic: domain orders with no settlement presence
     not_in_settlement: tuple[str, ...] = ()
 
-    def ceiling_recomputed(self) -> Decimal:
-        """Row-sum of per-finding ceilings — proves the total is never a stored literal."""
+    @property
+    def ceiling_amount(self) -> Decimal:
+        """Row-sum of the findings' ceilings — a single source of truth (no stored total
+        that could drift from the rows)."""
         return sum((f.ceiling_amount for f in self.findings), Decimal("0.00"))
+
+    def ceiling_recomputed(self) -> Decimal:
+        """Backwards-compatible alias for :attr:`ceiling_amount`."""
+        return self.ceiling_amount
 
 
 def _merge_provenance(sources_lists) -> tuple[SourceRef, ...]:
@@ -90,6 +96,7 @@ def reconcile(
     settlement_order_ids: set[str] | None = None,
 ) -> ReconciliationResult:
     """Detect flagged findings for ``claim`` over ``domain`` (passed in, never hardcoded)."""
+    claim.assert_compatible(rule)  # the rule this engine evaluates must match the plugin's logic
     rule_hash = rule.content_hash()
     params = rule.parameters
     charge_type: ChargeType = claim.recoverable_charge_type
@@ -97,10 +104,10 @@ def reconcile(
     findings: list[Finding] = []
     anomalies: list[Anomaly] = []
     out_of_scope: list[OutOfScopeRow] = []
-    ceiling_total = Decimal("0.00")
     n_in_scope = n_mature = n_fresh = 0
 
-    for oid in domain:
+    # iterate in a stable order so diagnostics (anomalies / out-of-scope) are deterministic
+    for oid in sorted(domain):
         record = dataset.by_order.get(oid)
         event = record.cancellation if record else None
         if event is None:
@@ -160,7 +167,6 @@ def reconcile(
             anomalies=tuple(codes),
         )
         findings.append(finding)
-        ceiling_total += raf_total
 
     not_in_settlement: tuple[str, ...] = ()
     if settlement_order_ids is not None:
@@ -177,7 +183,6 @@ def reconcile(
         canceled_orders=len(domain),
         in_scope=n_in_scope,
         flagged=len(findings),
-        ceiling_amount=ceiling_total,
         mature=n_mature,
         fresh=n_fresh,
         anomalies=tuple(anomalies),
@@ -193,6 +198,11 @@ def _out_of_scope_reason(event, claim: RafAutoCancelClaim) -> str:
     if not claim.gate2_pre_shipment(event):
         why.append("shipped before cancel")
     return "; ".join(why)
+
+
+# Numerical slack for the 20%-of-referral sanity check — a non-policy tolerance (absorbs
+# rounding), NOT a recoverable figure; deliberately not part of the versioned rule data.
+_ANOMALY_REFERRAL_TOLERANCE = Decimal("0.05")
 
 
 def _anomaly_codes(oid, raf_lines, charges, claim, rule, sink: list[Anomaly]) -> list[str]:
@@ -214,8 +224,9 @@ def _anomaly_codes(oid, raf_lines, charges, claim, rule, sink: list[Anomaly]) ->
     )
     if referral > 0:
         raf_total = sum((l.deduction_magnitude for l in raf_lines), Decimal("0.00"))
-        expected = min(referral * fee_schedule.referral_fee_rate, cap * max(len(raf_lines), 1))
-        if raf_total > expected + Decimal("0.05"):
+        expected = to_money(min(referral * fee_schedule.referral_fee_rate,
+                                cap * max(len(raf_lines), 1)))
+        if raf_total > expected + _ANOMALY_REFERRAL_TOLERANCE:
             codes.append("RAF_ABOVE_20PCT_REFERRAL")
             sink.append(Anomaly(oid, "RAF_ABOVE_20PCT_REFERRAL",
                                 f"RAF ${raf_total} exceeds ~20% of referral (${expected})"))
@@ -227,6 +238,17 @@ def _anomaly_codes(oid, raf_lines, charges, claim, rule, sink: list[Anomaly]) ->
 _RECOVERY_HIGH = {"recovery": ConfidenceLevel.HIGH}
 
 
+class RuleProvenanceMismatch(ValueError):
+    """A finding was resolved against a rule that isn't the one it was detected under."""
+
+    def __init__(self, finding: Finding, rule: Rule) -> None:
+        super().__init__(
+            f"Finding {finding.finding_id} carries rule_content_hash "
+            f"{finding.rule_content_hash[:12]} but was resolved against "
+            f"{rule.rule_id}@{rule.version} ({rule.content_hash()[:12]})."
+        )
+
+
 def resolve_finding(finding: Finding, raw: object, rule: Rule) -> Finding:
     """Pure: map a verified Gate-3 resolution to the updated finding.
 
@@ -234,8 +256,11 @@ def resolve_finding(finding: Finding, raw: object, rule: Rule) -> Finding:
     outcome path). A non-decisive value (empty / "other" / a buyer reason) is NEVER
     auto-resolved — the finding stays in ``needs_verification`` (recovery LOW). This is
     the single source of the classify->state mapping, shared by the in-memory
-    ``apply_resolutions`` and the ledger verify flow.
+    ``apply_resolutions`` and the ledger verify flow; the rule MUST be the one the
+    finding was detected under (provenance guard).
     """
+    if finding.rule_content_hash != rule.content_hash():
+        raise RuleProvenanceMismatch(finding, rule)
     if raw is None or not str(raw).strip():
         return finding
     policy = rule.resolution_policy
@@ -256,7 +281,14 @@ def resolve_finding(finding: Finding, raw: object, rule: Rule) -> Finding:
 def apply_resolutions(
     findings, resolutions: dict[str, str], rule: Rule
 ) -> list[Finding]:
-    """In-memory convenience: resolve each finding by its order_id resolution."""
+    """In-memory PROJECTION for analysis/preview — NOT the system of record.
+
+    It does not write to the evidence ledger, so it must never drive a real filing: the
+    authoritative Gate-3 path is ``ledger.verify_finding`` (records an append-only
+    resolution + transition). Use this only to preview "what would the funnel look like if
+    these resolutions held"; reconstruct real verified state with ``ledger.replay``.
+    Intentionally not exported from ``klemr.reconciliation``'s public API.
+    """
     return [
         resolve_finding(f, resolutions.get(f.credit_match_key.order_id), rule)
         for f in findings

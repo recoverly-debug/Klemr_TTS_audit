@@ -9,11 +9,13 @@ from klemr.reconciliation.engine import (
     Anomaly,
     OutOfScopeRow,
     ReconciliationResult,
-    apply_resolutions,
+    RuleProvenanceMismatch,
     reconcile,
     resolve_finding,
     run_fingerprint,
 )
+# NOTE: apply_resolutions is deliberately NOT exported — it is an in-memory preview only,
+# not the authoritative (ledger-backed) resolution path. Import from .engine in tests.
 from klemr.reconciliation.finding import (
     CreditMatchKey,
     Finding,
@@ -23,10 +25,10 @@ from klemr.reconciliation.finding import (
 
 __all__ = [
     "reconcile",
-    "apply_resolutions",
     "resolve_finding",
     "run_fingerprint",
     "ReconciliationResult",
+    "RuleProvenanceMismatch",
     "Anomaly",
     "OutOfScopeRow",
     "Finding",
